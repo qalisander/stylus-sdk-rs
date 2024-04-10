@@ -233,12 +233,35 @@ pub fn external(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     let self_ty = &input.self_ty;
     let generic_params = &input.generics.params;
-    let where_clauses = input
+    let mut where_clauses: Vec<_> = input
         .generics
         .where_clause
         .clone()
         .map(|c| c.predicates)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|whr| quote!( { #whr } )).collect();
+
+    // collect restrictions for storage with trait inside #[restrict_storage_with(impl MyTrait)] attribute
+    for attr in mem::take(&mut input.attrs) {
+        if !attr.path.is_ident("restrict_storage_with") {
+            input.attrs.push(attr);
+            continue;
+        }
+        let contents: InheritsAttr = match attr.parse_args() {
+            Ok(contents) => contents,
+            Err(err) => return proc_macro::TokenStream::from(err.to_compile_error()),
+        };
+        for ty in contents.types {
+            match ty {
+                Type::ImplTrait(ty_impl) => {
+                    let bounds = ty_impl.bounds;
+                    where_clauses.push(quote! { S: #bounds });
+                }
+                _ => panic!("not supported type inside restrict_storage_with attribute"),
+            }
+        }
+    }
 
     // implement Router with inheritence
     let mut router = quote! {
@@ -248,7 +271,7 @@ pub fn external(_attr: TokenStream, input: TokenStream) -> TokenStream {
         where
             S: stylus_sdk::storage::TopLevelStorage + core::borrow::BorrowMut<Self>,
             #(#borrow_clauses,)*
-            #where_clauses
+            #(#where_clauses,)*
         {
             // TODO: this should be configurable
             type Storage = Self;
@@ -322,7 +345,7 @@ pub fn external(_attr: TokenStream, input: TokenStream) -> TokenStream {
     }));
 
     router.extend(quote! {
-        impl<#generic_params> stylus_sdk::abi::GenerateAbi for #self_ty where #where_clauses {
+        impl<#generic_params> stylus_sdk::abi::GenerateAbi for #self_ty where #(#where_clauses,)* {
             const NAME: &'static str = #name;
 
             fn fmt_abi(f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
