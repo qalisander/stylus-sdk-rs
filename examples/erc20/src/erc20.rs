@@ -7,7 +7,7 @@ use stylus_sdk::{
     prelude::*,
 };
 
-pub trait Erc20Params {
+pub trait Erc20Params: 'static {
     const NAME: &'static str;
     const SYMBOL: &'static str;
     const DECIMALS: u8;
@@ -15,7 +15,7 @@ pub trait Erc20Params {
 
 sol_storage! {
     /// Erc20 implements all ERC-20 methods.
-    pub struct Erc20<T> {
+    pub struct Erc20<T: Erc20Params> {
         /// Maps users to balances
         mapping(address => uint256) balances;
         /// Maps users to a mapping of each spender's allowance
